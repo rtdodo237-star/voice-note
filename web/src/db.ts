@@ -12,6 +12,10 @@ export interface Recording {
   size: number;
   blob: Blob;
   recovered?: boolean;
+  /** 드라이브 전송 상태 (연결 설정 시) */
+  upload?: { status: 'pending' | 'uploading' | 'done' | 'error'; fileId?: string; error?: string; at?: string };
+  /** 받아쓰기 진행 상태 (연결 서버에서 받아옴) */
+  remote?: { status: string; error?: string; textId?: string; checkedAt?: string };
 }
 
 export type RecordingMeta = Omit<Recording, 'blob'>;
@@ -87,6 +91,12 @@ export async function putRecording(rec: Recording): Promise<void> {
   const tx = db.transaction('recordings', 'readwrite');
   tx.objectStore('recordings').put(rec);
   await done(tx);
+}
+
+/** 녹음 파일은 그대로 두고 일부 정보만 바꾸기 */
+export async function patchRecording(id: string, patch: Partial<Omit<Recording, 'id' | 'blob'>>): Promise<void> {
+  const rec = await getRecording(id);
+  if (rec) await putRecording({ ...rec, ...patch });
 }
 
 export async function renameRecording(id: string, title: string): Promise<void> {

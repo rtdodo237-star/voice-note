@@ -12,8 +12,12 @@ import {
 } from './db';
 import type { RecordingMeta } from './db';
 import { extFor, fileStamp, formatDate, formatDuration, formatSize, safeName } from './format';
+import { describe, loadSettings, ping, refreshStatus, saveSettings, sendRecording, syncPending } from './sync';
 
-type Screen = { name: 'home' } | { name: 'record' } | { name: 'detail'; id: string };
+type Screen = { name: 'home' } | { name: 'record' } | { name: 'detail'; id: string } | { name: 'settings' };
+
+/** 말씀노트 (Claude 아티팩트) — 받아쓴 녹음이 정리되어 들어가는 곳 */
+const NOTE_APP_URL = 'https://claude.ai/artifact/XHqf2QNp3jx4e7Pt1LwfQC';
 type Filter = ModeId | 'all';
 
 const LAST_MODE_KEY = 'voice-note/last-mode';
@@ -66,6 +70,25 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', onPrompt);
   }, [refresh, showToast]);
 
+  // 드라이브 연결: 못 보낸 녹음 보내기 + 받아쓰기 상태 받아오기 (앱 열 때 · 인터넷 다시 연결될 때 · 1분마다)
+  const syncNow = useCallback(async () => {
+    if (!loadSettings()) return;
+    await syncPending(refresh).catch(() => 0);
+    const cur = await listRecordings();
+    if (await refreshStatus(cur).catch(() => false)) await refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const t0 = window.setTimeout(syncNow, 1500);
+    const iv = window.setInterval(() => document.visibilityState === 'visible' && syncNow(), 60000);
+    window.addEventListener('online', syncNow);
+    return () => {
+      window.clearTimeout(t0);
+      window.clearInterval(iv);
+      window.removeEventListener('online', syncNow);
+    };
+  }, [syncNow]);
+
   const selectMode = (m: ModeId) => {
     setMode(m);
     try {
@@ -113,6 +136,7 @@ export default function App() {
           onStart={onStartTap}
           items={items}
           onOpen={(id) => setScreen({ name: 'detail', id })}
+          onSettings={() => setScreen({ name: 'settings' })}
           micError={micError}
           onDismissError={() => setMicError(null)}
           installEvt={installEvt}
@@ -127,7 +151,15 @@ export default function App() {
           onSaved={async (id) => {
             await refresh();
             setScreen({ name: 'detail', id });
-            showToast('저장했어요');
+            const s = loadSettings();
+            showToast(s?.auto ? '저장했어요 · 드라이브로 보내는 중' : '저장했어요');
+            if (s?.auto) {
+              setTimeout(refresh, 300); // '보내는 중' 표시
+              sendRecording(id)
+                .then(() => showToast('드라이브로 보냈어요 · 곧 받아쓰기를 시작해요'))
+                .catch((e) => showToast('드라이브 전송 실패: ' + (e as Error).message))
+                .finally(refresh);
+            }
           }}
           onDiscarded={() => {
             setScreen({ name: 'home' });
@@ -146,7 +178,20 @@ export default function App() {
             setScreen({ name: 'home' });
             showToast('삭제했어요');
           }}
+          onSettings={() => setScreen({ name: 'settings' })}
           showToast={showToast}
+          stamp={items}
+        />
+      )}
+
+      {screen.name === 'settings' && (
+        <Settings
+          onBack={() => setScreen({ name: 'home' })}
+          onSaved={() => {
+            setScreen({ name: 'home' });
+            showToast('드라이브 연결을 저장했어요');
+            syncNow();
+          }}
         />
       )}
 
@@ -184,12 +229,14 @@ function Home(props: {
   onStart: () => void;
   items: RecordingMeta[];
   onOpen: (id: string) => void;
+  onSettings: () => void;
   micError: string | null;
   onDismissError: () => void;
   installEvt: InstallPromptEvent | null;
   onInstalled: () => void;
 }) {
-  const { mode, onSelectMode, onStart, items, onOpen, micError, onDismissError, installEvt, onInstalled } = props;
+  const { mode, onSelectMode, onStart, items, onOpen, onSettings, micError, onDismissError, installEvt, onInstalled } = props;
+  const connected = !!loadSettings();
   const [filter, setFilter] = useState<Filter>('all');
   const [usage, setUsage] = useState<string | null>(null);
   const [hideInstall, setHideInstall] = useState(() => {
@@ -226,7 +273,13 @@ function Home(props: {
   return (
     <main className="page">
       <header className="home-head">
-        <h1 className="brand">녹음 노트</h1>
+        <div className="head-row">
+          <h1 className="brand">녹음 노트</h1>
+          <button className={`conn${connected ? ' on' : ''}`} onClick={onSettings}>
+            <span className="conn-dot" aria-hidden="true" />
+            {connected ? '말씀노트 연결됨' : '말씀노트 연결'}
+          </button>
+        </div>
         <p className="lede">어떤 자리를 녹음하나요?</p>
       </header>
 
@@ -319,6 +372,7 @@ function Home(props: {
           <ul className="rows">
             {filtered.map((r) => {
               const m = getMode(r.mode);
+              const sync = describe(r);
               return (
                 <li key={r.id}>
                   <button className="row" onClick={() => onOpen(r.id)}>
@@ -331,6 +385,7 @@ function Home(props: {
                         {formatDate(r.createdAt)} · {formatDuration(r.durationMs)} · {formatSize(r.size)}
                         {r.recovered ? ' · 복구됨' : ''}
                       </span>
+                      {sync && <span className={`sync ${sync.tone}`}>{sync.text}</span>}
                     </span>
                     <span className="chev" aria-hidden="true">›</span>
                   </button>
@@ -341,7 +396,11 @@ function Home(props: {
         )}
       </section>
 
-      <p className="foot muted">녹음은 이 기기 안에만 저장돼요. 다른 기기로 옮기려면 녹음을 열고 “파일로 내보내기”를 누르세요.</p>
+      <p className="foot muted">
+        {connected
+          ? '녹음은 이 기기에 저장되고, 구글 드라이브로 보내져 받아쓴 뒤 말씀노트에 정리돼요.'
+          : '녹음은 이 기기 안에만 저장돼요. 위 “말씀노트 연결”을 하면 자동으로 받아써서 정리해 줘요.'}
+      </p>
     </main>
   );
 }
@@ -500,9 +559,12 @@ function Detail(props: {
   onBack: () => void;
   onChanged: () => void;
   onDeleted: () => void;
+  onSettings: () => void;
   showToast: (msg: string) => void;
+  /** 목록이 새로고침될 때마다 바뀌는 값 — 백그라운드 전송 결과를 화면에 반영 */
+  stamp: unknown;
 }) {
-  const { id, onBack, onChanged, onDeleted, showToast } = props;
+  const { id, onBack, onChanged, onDeleted, onSettings, showToast, stamp } = props;
   const [rec, setRec] = useState<Awaited<ReturnType<typeof getRecording>>>(undefined);
   const [url, setUrl] = useState<string | null>(null);
   const [rate, setRate] = useState(1);
@@ -525,6 +587,11 @@ function Detail(props: {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [id]);
+
+  // 전송·받아쓰기 상태만 다시 읽기 (재생 중인 오디오는 그대로)
+  useEffect(() => {
+    getRecording(id).then((r) => r && setRec(r));
+  }, [id, stamp]);
 
   if (!rec) {
     return (
@@ -637,10 +704,9 @@ function Detail(props: {
           <dt>저장 위치</dt>
           <dd className="mono">{m.ragCollection}</dd>
         </dl>
-        <button className="btn ghost block" disabled>
-          텍스트로 변환 · 다음 단계에서 연결
-        </button>
       </section>
+
+      <SyncPanel rec={rec} onChanged={async () => { setRec(await getRecording(rec.id)); onChanged(); }} onSettings={onSettings} showToast={showToast} />
 
       {!confirmDelete ? (
         <button className="btn text danger block" onClick={() => setConfirmDelete(true)}>
@@ -665,6 +731,208 @@ function Detail(props: {
           </div>
         </div>
       )}
+    </main>
+  );
+}
+
+/* ---------------- 말씀노트 연결 상태 (상세 화면) ---------------- */
+
+function SyncPanel(props: {
+  rec: NonNullable<Awaited<ReturnType<typeof getRecording>>>;
+  onChanged: () => void;
+  onSettings: () => void;
+  showToast: (msg: string) => void;
+}) {
+  const { rec, onChanged, onSettings, showToast } = props;
+  const [progress, setProgress] = useState<number | null>(null);
+  const settings = loadSettings();
+  const st = describe(rec);
+
+  // 상세 화면을 여는 동안 받아쓰기 상태를 30초마다 확인
+  useEffect(() => {
+    if (!settings || rec.upload?.status !== 'done') return;
+    const check = () => refreshStatus([rec]).then((ch) => ch && onChanged()).catch(() => {});
+    check();
+    const iv = window.setInterval(check, 30000);
+    return () => window.clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec.id, rec.upload?.status, rec.remote?.status]);
+
+  if (!settings) {
+    return (
+      <section className="sync-panel">
+        <h2>말씀노트 연결</h2>
+        <p className="muted">연결하면 이 녹음을 자동으로 받아써서 말씀노트에 정리해 넣어요.</p>
+        <button className="btn ghost block" onClick={onSettings}>
+          연결 설정하기
+        </button>
+      </section>
+    );
+  }
+
+  const send = async () => {
+    setProgress(0);
+    try {
+      await sendRecording(rec.id, (r) => setProgress(r));
+      showToast('드라이브로 보냈어요 · 곧 받아쓰기를 시작해요');
+    } catch (e) {
+      showToast('전송 실패: ' + (e as Error).message);
+    } finally {
+      setProgress(null);
+      onChanged();
+    }
+  };
+
+  const canSend = rec.upload?.status !== 'done' && rec.upload?.status !== 'uploading' && progress === null;
+  const failed = rec.remote?.status === 'failed';
+
+  return (
+    <section className="sync-panel">
+      <h2>말씀노트 연결</h2>
+      <ol className="steps">
+        <li className={rec.upload?.status === 'done' ? 'ok' : rec.upload?.status === 'error' ? 'err' : 'now'}>
+          <b>드라이브 전송</b>
+          <span>
+            {rec.upload?.status === 'done' ? '완료' : progress !== null ? `보내는 중 ${Math.round(progress * 100)}%` : rec.upload?.status === 'uploading' ? '보내는 중' : rec.upload?.status === 'error' ? rec.upload.error : '대기'}
+          </span>
+        </li>
+        <li className={rec.remote?.status === 'done' ? 'ok' : failed ? 'err' : rec.upload?.status === 'done' ? 'now' : ''}>
+          <b>받아쓰기 (VITO)</b>
+          <span>
+            {rec.remote?.status === 'done' ? '완료' : failed ? rec.remote?.error || '실패' : rec.remote?.status === 'submitted' ? '받아쓰는 중 · 녹음 길이에 따라 수 분' : rec.upload?.status === 'done' ? '5분 안에 시작' : '전송 후 시작'}
+          </span>
+        </li>
+        <li className={rec.remote?.status === 'done' ? 'now' : ''}>
+          <b>말씀노트 등록 · AI 정리</b>
+          <span>{rec.remote?.status === 'done' ? '1시간 안에 자동 등록돼요' : '받아쓰기 후 자동'}</span>
+        </li>
+      </ol>
+      {progress !== null && (
+        <div className="bar" aria-hidden="true">
+          <i style={{ width: `${Math.round(progress * 100)}%` }} />
+        </div>
+      )}
+      {canSend && (
+        <button className="btn solid block" style={{ background: getMode(rec.mode).color }} onClick={send}>
+          {rec.upload?.status === 'error' ? '다시 보내기' : '드라이브로 보내기'}
+        </button>
+      )}
+      {st?.tone === 'ok' && (
+        <a className="btn ghost block link-btn" href={NOTE_APP_URL} target="_blank" rel="noopener noreferrer">
+          말씀노트 열기
+        </a>
+      )}
+    </section>
+  );
+}
+
+/* ---------------- 연결 설정 ---------------- */
+
+function Settings({ onBack, onSaved }: { onBack: () => void; onSaved: () => void }) {
+  const cur = loadSettings();
+  const [url, setUrl] = useState(cur?.url || '');
+  const [key, setKey] = useState(cur?.key || '');
+  const [auto, setAuto] = useState(cur?.auto ?? true);
+  const [check, setCheck] = useState<{ tone: 'ok' | 'err' | 'busy'; text: string } | null>(null);
+  const [confirmOff, setConfirmOff] = useState(false);
+
+  const test = async (): Promise<boolean> => {
+    const s = { url: url.trim(), key: key.trim(), auto };
+    if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(s.url)) {
+      setCheck({ tone: 'err', text: '주소는 https://script.google.com/… 으로 시작하고 /exec 로 끝나야 해요.' });
+      return false;
+    }
+    if (!s.key) {
+      setCheck({ tone: 'err', text: '연결 키를 넣어 주세요. (Apps Script setup 실행 로그에 있어요)' });
+      return false;
+    }
+    setCheck({ tone: 'busy', text: '연결 확인 중…' });
+    try {
+      const r = await ping(s);
+      setCheck(
+        r.vito
+          ? { tone: 'ok', text: `연결됐어요. 드라이브 '${r.folder}' 폴더 · VITO 받아쓰기 준비 완료` }
+          : { tone: 'err', text: '연결은 됐지만 VITO 키가 아직 없어요. Apps Script 맨 위에 키를 넣고 setup을 다시 실행해 주세요.' },
+      );
+      return true;
+    } catch (e) {
+      setCheck({ tone: 'err', text: (e as Error).message });
+      return false;
+    }
+  };
+
+  const save = async () => {
+    if (await test()) {
+      saveSettings({ url: url.trim(), key: key.trim(), auto });
+      onSaved();
+    }
+  };
+
+  return (
+    <main className="page">
+      <button className="back" onClick={onBack}>
+        ‹ 돌아가기
+      </button>
+      <h1 className="detail-title">말씀노트 연결</h1>
+      <p className="muted">
+        녹음을 구글 드라이브로 보내면 자동으로 받아쓰고(화자 구분 포함), Claude가 말씀노트에 모드별 지침대로 정리해 넣어요.
+      </p>
+
+      <label className="field-label" htmlFor="set-url">
+        연결 주소 (Apps Script 웹 앱 URL)
+      </label>
+      <input id="set-url" className="field mono-in" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="https://script.google.com/macros/s/…/exec" value={url} onChange={(e) => setUrl(e.target.value)} />
+
+      <label className="field-label" htmlFor="set-key">
+        연결 키
+      </label>
+      <input id="set-key" className="field mono-in" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="setup 실행 로그의 '연결 키'" value={key} onChange={(e) => setKey(e.target.value)} />
+
+      <label className="toggle" htmlFor="set-auto">
+        <input id="set-auto" type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+        <span>
+          <b>저장하면 바로 드라이브로 보내기</b>
+          <small>끄면 녹음 상세 화면에서 직접 보낼 수 있어요</small>
+        </span>
+      </label>
+
+      {check && <p className={`note-line ${check.tone}`}>{check.text}</p>}
+
+      <div className="row-btns">
+        <button className="btn ghost" onClick={test}>
+          연결 확인
+        </button>
+        <button className="btn solid" onClick={save}>
+          저장
+        </button>
+      </div>
+
+      {cur &&
+        (!confirmOff ? (
+          <button className="btn text danger block" onClick={() => setConfirmOff(true)}>
+            이 기기의 연결 끊기
+          </button>
+        ) : (
+          <div className="confirm">
+            <span>연결을 끊을까요? 녹음은 그대로 남고, 새 녹음만 드라이브로 가지 않아요.</span>
+            <div className="confirm-actions">
+              <button className="btn small ghost" onClick={() => setConfirmOff(false)}>
+                취소
+              </button>
+              <button
+                className="btn small danger-solid"
+                onClick={() => {
+                  saveSettings(null);
+                  onBack();
+                }}
+              >
+                끊기
+              </button>
+            </div>
+          </div>
+        ))}
+
+      <p className="foot muted">연결 주소와 키는 이 기기에만 저장돼요. 맥·아이폰·갤럭시마다 한 번씩 넣어 주세요.</p>
     </main>
   );
 }

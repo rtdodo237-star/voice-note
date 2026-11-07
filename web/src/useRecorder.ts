@@ -135,7 +135,8 @@ export function useRecorder() {
       streamRef.current = stream;
 
       const mimeType = pickMimeType();
-      const rec = mimeType ? new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 96000 }) : new MediaRecorder(stream);
+      // 음성용 48kbps: 2시간 녹음도 약 43MB → 받아쓰기 서버 한도(48MB) 안쪽
+      const rec = mimeType ? new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 48000 }) : new MediaRecorder(stream);
       const sessionId = newId();
       sessionRef.current = sessionId;
       await startSession({
