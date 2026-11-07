@@ -33,13 +33,17 @@ jobs:
           cache: npm
 
       - name: Java 17 설정
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Android SDK 설정
-        uses: android-actions/setup-android@v3
+      # Android SDK는 GitHub 빌드 서버(ubuntu)에 기본 설치돼 있음 (ANDROID_HOME)
+      - name: Android SDK 확인
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" | tail -3
+          ls "$ANDROID_HOME/build-tools" | tail -3
 
       - name: 라이브러리 설치
         run: npm ci
