@@ -15,11 +15,12 @@ interface Props {
   onOpen: (item: RecordingItem) => void;
   connected: boolean;
   onSettings: () => void;
+  onImport?: () => void;
 }
 
 type Filter = ModeId | 'all';
 
-export default function HomeScreen({ selectedMode, onSelectMode, onStart, recordings, onOpen, connected, onSettings }: Props) {
+export default function HomeScreen({ selectedMode, onSelectMode, onStart, recordings, onOpen, connected, onSettings, onImport }: Props) {
   const [filter, setFilter] = useState<Filter>('all');
   const mode = getMode(selectedMode);
 
@@ -59,6 +60,12 @@ export default function HomeScreen({ selectedMode, onSelectMode, onStart, record
       <Pressable style={[styles.startBtn, { backgroundColor: mode.color }]} onPress={onStart}>
         <Text style={styles.startText}>● {mode.label} 녹음 시작</Text>
       </Pressable>
+
+      {onImport && (
+        <Pressable style={styles.importBtn} onPress={onImport}>
+          <Text style={styles.importText}>📝 받아쓴 글 가져오기 (갤럭시 녹음 앱 · 붙여넣기)</Text>
+        </Pressable>
+      )}
 
       <View style={styles.listHeader}>
         <Text style={styles.sectionTitle}>녹음 목록</Text>
@@ -132,6 +139,8 @@ const styles = StyleSheet.create({
   modeDesc: { fontSize: 12, color: '#6B7280', marginTop: 4 },
   startBtn: { marginTop: 20, paddingVertical: 18, borderRadius: 16, alignItems: 'center' },
   startText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
+  importBtn: { marginTop: 10, paddingVertical: 13, borderRadius: 14, alignItems: 'center', backgroundColor: '#F3F4F6' },
+  importText: { color: '#374151', fontSize: 14, fontWeight: '700' },
   listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 32 },
   sectionTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
   count: { fontSize: 13, color: '#9CA3AF' },

@@ -76,8 +76,11 @@ export default function SettingsScreen({ onBack, onSaved }: Props) {
       const r = await ping(s);
       setCheck(
         r.vito
-          ? { tone: 'ok', text: `연결됐어요. 드라이브 '${r.folder}' 폴더 · VITO 받아쓰기 준비 완료` }
-          : { tone: 'err', text: '연결은 됐지만 VITO 키가 아직 없어요. Apps Script 맨 위에 키를 넣고 setup을 다시 실행해 주세요.' },
+          ? { tone: 'ok', text: `연결됐어요. 드라이브 '${r.folder}' 폴더 · VITO 자동 받아쓰기 준비 완료` }
+          : {
+              tone: 'ok',
+              text: `연결됐어요. 드라이브 '${r.folder}' 폴더 · '받아쓴 글 가져오기'(갤럭시 녹음 앱 공유)를 쓸 수 있어요. 자동 받아쓰기(VITO)는 꺼져 있어서, 이 앱으로 녹음한 파일은 드라이브에 보관만 돼요.`,
+            },
       );
       return true;
     } catch (e) {
@@ -129,8 +132,8 @@ export default function SettingsScreen({ onBack, onSaved }: Props) {
 
         <View style={styles.toggle}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.toggleTitle}>저장하면 바로 드라이브로 보내기</Text>
-            <Text style={styles.toggleSub}>끄면 녹음 상세 화면에서 직접 보낼 수 있어요</Text>
+            <Text style={styles.toggleTitle}>녹음 저장하면 바로 드라이브로 보내기</Text>
+            <Text style={styles.toggleSub}>끄면 녹음 상세 화면에서 직접 보낼 수 있어요 · VITO가 없으면 드라이브 보관용</Text>
           </View>
           <Switch value={auto} onValueChange={setAuto} />
         </View>

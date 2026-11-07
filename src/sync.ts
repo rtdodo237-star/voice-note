@@ -142,6 +142,29 @@ export async function syncPending(onChange?: () => void): Promise<number> {
   return sent;
 }
 
+/* ---------- 받아쓴 글(녹취록 md) 바로 보내기 ---------- */
+
+/** 갤럭시 녹음 앱 등에서 이미 받아쓴 글을 드라이브 '2_녹취'에 md 로 저장 → 말씀노트가 가져감 (VITO 필요 없음) */
+export async function sendTranscript(name: string, text: string): Promise<string> {
+  const s = await loadSettings();
+  if (!s) throw new Error('말씀노트 연결이 아직 설정되지 않았어요. 설정에서 주소와 키를 넣어 주세요.');
+  const { token, textFolderId } = await call<{ token: string; textFolderId?: string }>(s, 'token');
+  if (!textFolderId) throw new Error('연결 서버가 옛 버전이에요. Apps Script 코드를 새 Code.gs로 바꾸고 "새 배포"를 해 주세요.');
+  const boundary = 'vn' + Date.now().toString(36);
+  const meta = { name, mimeType: 'text/markdown', parents: [textFolderId], appProperties: { vn_src: 'share' } };
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
+    `--${boundary}\r\nContent-Type: text/markdown; charset=UTF-8\r\n\r\n${text}\r\n--${boundary}--`;
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  if (res.status === 401) throw new Error('드라이브 권한이 만료됐어요. 잠시 뒤 다시 시도해 주세요.');
+  if (!res.ok) throw new Error(`드라이브 저장 실패 (${res.status})`);
+  return (await res.json()).id;
+}
+
 /* ---------- 받아쓰기 상태 ---------- */
 
 const FINAL = new Set(['done', 'failed']);
@@ -176,7 +199,7 @@ export function describe(r: RecordingItem, connected: boolean): { text: string; 
   if (u === 'uploading') return { text: '드라이브로 보내는 중', tone: 'busy' };
   if (u === 'error') return { text: '전송 실패 · 다시 보내기 필요', tone: 'err' };
   const st = r.remote?.status || 'uploaded';
-  if (st === 'uploaded') return { text: '받아쓰기 대기 (5분 안)', tone: 'busy' };
+  if (st === 'uploaded') return { text: '드라이브에 보관됨 · 받아쓰기 대기', tone: 'busy' };
   if (st === 'submitted') return { text: '받아쓰는 중', tone: 'busy' };
   if (st === 'done') return { text: '받아쓰기 완료 · 말씀노트 등록 대기', tone: 'ok' };
   if (st === 'failed') return { text: '받아쓰기 실패', tone: 'err' };

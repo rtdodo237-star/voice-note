@@ -88,7 +88,8 @@ function doGet(e) {
   }
   if (q.action === 'token') {
     // 앱이 드라이브에 녹음을 직접 올리는 데 쓰는 1시간짜리 권한 (이 연결이 만든 파일만 다룰 수 있음)
-    return json_({ ok: true, token: ScriptApp.getOAuthToken(), audioFolderId: p.getProperty('AUDIO_ID') });
+    // textFolderId: 갤럭시 녹음 앱 등에서 받아쓴 글을 앱이 녹취록(md)으로 바로 저장할 때 사용
+    return json_({ ok: true, token: ScriptApp.getOAuthToken(), audioFolderId: p.getProperty('AUDIO_ID'), textFolderId: p.getProperty('TEXT_ID') });
   }
   if (q.action === 'status') {
     const ids = String(q.ids || '').split(',').filter(Boolean).slice(0, 50);

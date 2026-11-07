@@ -13,6 +13,9 @@ import RecordScreen from './src/screens/RecordScreen';
 import DetailScreen from './src/screens/DetailScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import UpdateCard from './src/screens/UpdateCard';
+import ShareScreen from './src/screens/ShareScreen';
+import { useShareIntent } from 'expo-share-intent';
+import { File } from 'expo-file-system';
 import { checkForUpdate } from './src/updater';
 import type { UpdateInfo } from './src/updater';
 import { loadSettings, refreshStatus, sendRecording, syncPending } from './src/sync';
@@ -31,7 +34,8 @@ type Screen =
   | { name: 'home' }
   | { name: 'record'; mode: ModeId }
   | { name: 'detail'; id: string }
-  | { name: 'settings' };
+  | { name: 'settings' }
+  | { name: 'share'; text: string; title?: string | null };
 
 /** 짧은 알림 (안드로이드는 토스트, 그 외는 생략) */
 const notify = (msg: string) => {
@@ -43,6 +47,28 @@ export default function App() {
   const [mode, setMode] = useState<ModeId>('consult');
   const [recordings, setRecordings] = useState<RecordingItem[]>([]);
   const [connected, setConnected] = useState(false);
+
+  // 다른 앱(갤럭시 녹음 앱 등)에서 '공유'로 받은 받아쓰기 글
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent();
+  useEffect(() => {
+    if (!hasShareIntent) return;
+    (async () => {
+      let text = shareIntent.text || '';
+      // .txt 파일로 공유된 경우 파일 내용 읽기
+      if (!text.trim() && shareIntent.files?.length) {
+        for (const f of shareIntent.files) {
+          if (!/text|plain|markdown/i.test(f.mimeType || '') && !/\.(txt|md)$/i.test(f.fileName || '')) continue;
+          try {
+            text += (text ? '\n\n' : '') + (await new File(f.path).text());
+          } catch {
+            /* 읽지 못한 파일은 건너뜀 */
+          }
+        }
+      }
+      setScreen({ name: 'share', text, title: shareIntent.meta?.title });
+      resetShareIntent();
+    })();
+  }, [hasShareIntent, shareIntent, resetShareIntent]);
 
   const refresh = useCallback(async () => setRecordings(await loadRecordings()), []);
 
@@ -160,6 +186,22 @@ export default function App() {
             onOpen={(item) => setScreen({ name: 'detail', id: item.id })}
             connected={connected}
             onSettings={() => setScreen({ name: 'settings' })}
+            onImport={Platform.OS === 'android' ? () => setScreen({ name: 'share', text: '' }) : undefined}
+          />
+        )}
+        {screen.name === 'share' && (
+          <ShareScreen
+            key={screen.text.slice(0, 40)}
+            initialText={screen.text}
+            metaTitle={screen.title}
+            defaultMode={mode}
+            connected={connected}
+            onSettings={() => setScreen({ name: 'settings' })}
+            onCancel={() => setScreen({ name: 'home' })}
+            onDone={(msg) => {
+              notify(msg);
+              setScreen({ name: 'home' });
+            }}
           />
         )}
         {screen.name === 'record' && (

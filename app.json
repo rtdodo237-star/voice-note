@@ -2,6 +2,7 @@
   "expo": {
     "name": "녹음 노트",
     "slug": "voice-note",
+    "scheme": "voicenote",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -30,6 +31,13 @@
         {
           "microphonePermission": "상담·회의·강의·말씀을 녹음하기 위해 마이크를 사용합니다.",
           "enableBackgroundRecording": true
+        }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "androidIntentFilters": ["text/*"],
+          "disableIOS": true
         }
       ]
     ]
