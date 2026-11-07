@@ -1,0 +1,57 @@
+# 웹앱(맥·아이폰·갤럭시 공용) 자동 배포
+# web/ 폴더가 바뀌면 빌드해서 GitHub Pages 주소로 게시한다.
+name: 웹앱 배포
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/web-pages.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 라이브러리 설치
+        run: npm ci
+
+      - name: 빌드 (타입 검사 포함)
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

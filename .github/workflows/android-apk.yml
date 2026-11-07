@@ -6,6 +6,7 @@ name: Android APK 빌드
 on:
   push:
     branches: [main]
+    paths-ignore: ['web/**', '.github/workflows/web-pages.yml', '**.md']
   workflow_dispatch: {}
 
 permissions:
