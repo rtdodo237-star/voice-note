@@ -2,6 +2,39 @@
 import React, { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { loadSettings, ping, saveSettings } from '../sync';
+import { checkForUpdate, currentVersion, supported as updateSupported } from '../updater';
+import type { UpdateInfo } from '../updater';
+import UpdateCard from './UpdateCard';
+
+/** 앱 버전 · 업데이트 확인 */
+function AppVersion() {
+  const [state, setState] = useState<{ busy: boolean; info: UpdateInfo | null; msg: string }>({ busy: false, info: null, msg: '' });
+  if (!updateSupported) return null;
+  const check = async () => {
+    setState({ busy: true, info: null, msg: '' });
+    try {
+      const info = await checkForUpdate(true);
+      setState({ busy: false, info, msg: info ? '' : '최신 버전이에요.' });
+    } catch (e) {
+      setState({ busy: false, info: null, msg: (e as Error).message });
+    }
+  };
+  return (
+    <View style={styles.verBox}>
+      <View style={styles.verRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.toggleTitle}>앱 버전 {currentVersion()}</Text>
+          <Text style={styles.toggleSub}>새 버전이 나오면 앱을 열 때 자동으로 알려줘요</Text>
+        </View>
+        <Pressable style={[styles.small, styles.btnGhost, { flex: 0 }]} onPress={check} disabled={state.busy}>
+          <Text style={styles.btnGhostText}>{state.busy ? '확인 중…' : '업데이트 확인'}</Text>
+        </Pressable>
+      </View>
+      {state.msg ? <Text style={styles.toggleSub}>{state.msg}</Text> : null}
+      {state.info && <UpdateCard info={state.info} />}
+    </View>
+  );
+}
 
 interface Props {
   onBack: () => void;
@@ -141,6 +174,8 @@ export default function SettingsScreen({ onBack, onSaved }: Props) {
           ))}
 
         <Text style={styles.foot}>연결 주소와 키는 이 휴대폰에만 저장돼요.</Text>
+
+        <AppVersion />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -172,4 +207,6 @@ const styles = StyleSheet.create({
   confirmRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
   small: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 10, alignItems: 'center' },
   foot: { fontSize: 12, color: '#9CA3AF', textAlign: 'center', marginTop: 24 },
+  verBox: { marginTop: 28, paddingTop: 18, borderTopWidth: 1, borderTopColor: '#E5E7EB', gap: 10 },
+  verRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
 });

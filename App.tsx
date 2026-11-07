@@ -1,6 +1,6 @@
 // 앱 진입점 — 권한 요청, 오디오 설정, 화면 전환
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, AppState, Linking, Platform, StyleSheet, ToastAndroid } from 'react-native';
+import { Alert, AppState, Linking, Platform, StyleSheet, ToastAndroid, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -12,6 +12,9 @@ import HomeScreen from './src/screens/HomeScreen';
 import RecordScreen from './src/screens/RecordScreen';
 import DetailScreen from './src/screens/DetailScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import UpdateCard from './src/screens/UpdateCard';
+import { checkForUpdate } from './src/updater';
+import type { UpdateInfo } from './src/updater';
 import { loadSettings, refreshStatus, sendRecording, syncPending } from './src/sync';
 import { ENABLE_BACKGROUND_RECORDING, getMode } from './src/modes';
 import type { ModeId } from './src/modes';
@@ -52,11 +55,26 @@ export default function App() {
     if (await refreshStatus().catch(() => false)) await refresh();
   }, [refresh]);
 
+  // 앱 안 업데이트: 열 때 · 돌아올 때 새 버전 확인 (3시간에 한 번만 실제 확인)
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updateHidden, setUpdateHidden] = useState(false);
+  const checkUpdate = useCallback(() => {
+    checkForUpdate()
+      .then((u) => setUpdate(u))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     syncNow();
-    const sub = AppState.addEventListener('change', (st) => st === 'active' && syncNow());
+    checkUpdate();
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') {
+        syncNow();
+        checkUpdate();
+      }
+    });
     return () => sub.remove();
-  }, [syncNow]);
+  }, [syncNow, checkUpdate]);
 
   useEffect(() => {
     (async () => {
@@ -128,6 +146,11 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <StatusBar style="dark" />
+        {screen.name === 'home' && update && !updateHidden && (
+          <View style={styles.banner}>
+            <UpdateCard info={update} onDismiss={() => setUpdateHidden(true)} />
+          </View>
+        )}
         {screen.name === 'home' && (
           <HomeScreen
             selectedMode={mode}
@@ -182,4 +205,5 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#FFFFFF' },
+  banner: { paddingHorizontal: 20, paddingTop: 12 },
 });
