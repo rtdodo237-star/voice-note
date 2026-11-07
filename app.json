@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "녹음 노트",
+    "slug": "voice-note",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dodo237.voicenote"
+    },
+    "android": {
+      "package": "com.dodo237.voicenote",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "상담·회의·강의·말씀을 녹음하기 위해 마이크를 사용합니다.",
+          "enableBackgroundRecording": true
+        }
+      ]
+    ]
+  }
+}
