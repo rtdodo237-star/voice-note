@@ -5,6 +5,7 @@ import { MODES, getMode } from '../modes';
 import type { ModeId } from '../modes';
 import { formatDate, formatDuration } from '../storage';
 import type { RecordingItem } from '../storage';
+import { describe, TONE_COLOR } from '../sync';
 
 interface Props {
   selectedMode: ModeId;
@@ -12,11 +13,13 @@ interface Props {
   onStart: () => void;
   recordings: RecordingItem[];
   onOpen: (item: RecordingItem) => void;
+  connected: boolean;
+  onSettings: () => void;
 }
 
 type Filter = ModeId | 'all';
 
-export default function HomeScreen({ selectedMode, onSelectMode, onStart, recordings, onOpen }: Props) {
+export default function HomeScreen({ selectedMode, onSelectMode, onStart, recordings, onOpen, connected, onSettings }: Props) {
   const [filter, setFilter] = useState<Filter>('all');
   const mode = getMode(selectedMode);
 
@@ -27,7 +30,13 @@ export default function HomeScreen({ selectedMode, onSelectMode, onStart, record
 
   const header = (
     <View>
-      <Text style={styles.title}>녹음 노트</Text>
+      <View style={styles.headRow}>
+        <Text style={styles.title}>녹음 노트</Text>
+        <Pressable onPress={onSettings} style={styles.conn} hitSlop={6}>
+          <View style={[styles.connDot, connected && { backgroundColor: '#16A34A' }]} />
+          <Text style={[styles.connText, connected && { color: '#111827' }]}>{connected ? '말씀노트 연결됨' : '말씀노트 연결'}</Text>
+        </Pressable>
+      </View>
       <Text style={styles.subtitle}>어떤 녹음인가요?</Text>
 
       <View style={styles.grid}>
@@ -79,6 +88,7 @@ export default function HomeScreen({ selectedMode, onSelectMode, onStart, record
       ListEmptyComponent={<Text style={styles.empty}>아직 녹음이 없어요</Text>}
       renderItem={({ item }) => {
         const m = getMode(item.mode);
+        const sync = describe(item, connected);
         return (
           <Pressable style={styles.row} onPress={() => onOpen(item)}>
             <View style={[styles.badge, { backgroundColor: `${m.color}1A` }]}>
@@ -90,6 +100,7 @@ export default function HomeScreen({ selectedMode, onSelectMode, onStart, record
                 {formatDate(item.createdAt)} · {formatDuration(item.durationMs)}
                 {item.transcriptStatus === 'done' ? ' · 변환완료' : ''}
               </Text>
+              {sync && <Text style={[styles.sync, { color: TONE_COLOR[sync.tone] }]}>{sync.text}</Text>}
             </View>
           </Pressable>
         );
@@ -101,6 +112,11 @@ export default function HomeScreen({ selectedMode, onSelectMode, onStart, record
 const styles = StyleSheet.create({
   container: { padding: 20, paddingBottom: 48 },
   title: { fontSize: 28, fontWeight: '800', color: '#111827' },
+  headRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+  conn: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#FFFFFF' },
+  connDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB' },
+  connText: { fontSize: 13, fontWeight: '700', color: '#6B7280' },
+  sync: { fontSize: 12, fontWeight: '700', marginTop: 2 },
   subtitle: { fontSize: 15, color: '#6B7280', marginTop: 4, marginBottom: 16 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
   modeCard: {

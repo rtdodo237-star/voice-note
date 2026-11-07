@@ -13,6 +13,10 @@ export interface RecordingItem {
   createdAt: string; // ISO 날짜
   transcriptStatus: TranscriptStatus; // Phase 1(변환)에서 사용
   transcriptMd?: string; // 변환 결과 markdown
+  /** 드라이브 전송 상태 (말씀노트 연결 시) */
+  upload?: { status: 'pending' | 'uploading' | 'done' | 'error'; fileId?: string; error?: string; at?: string };
+  /** 받아쓰기 진행 상태 (연결 서버에서 받아옴) */
+  remote?: { status: string; error?: string; textId?: string; checkedAt?: string };
 }
 
 const KEY = 'voice-note/recordings/v1';

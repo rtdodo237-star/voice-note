@@ -1,20 +1,107 @@
 // 녹음 상세 — 재생 + 정보 + 삭제 (+ Phase 1에서 '텍스트 변환' 연결)
-import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { getMode } from '../modes';
 import { formatDate, formatDuration } from '../storage';
 import type { RecordingItem } from '../storage';
+import { NOTE_APP_URL, refreshStatus, sendRecording } from '../sync';
 
 interface Props {
   item: RecordingItem;
   onBack: () => void;
   onDelete: (id: string) => void;
+  connected: boolean;
+  onSettings: () => void;
+  /** 저장소가 바뀌었을 때 목록 다시 읽기 */
+  onChanged: () => void;
 }
 
 const RATES = [1, 1.25, 1.5, 2];
 
-export default function DetailScreen({ item, onBack, onDelete }: Props) {
+/* ---------- 말씀노트 연결 상태 ---------- */
+function SyncPanel({ item, color, connected, onSettings, onChanged }: { item: RecordingItem; color: string; connected: boolean; onSettings: () => void; onChanged: () => void }) {
+  const [progress, setProgress] = useState<number | null>(null);
+
+  // 화면을 보는 동안 받아쓰기 상태를 30초마다 확인
+  useEffect(() => {
+    if (!connected || item.upload?.status !== 'done') return;
+    const check = () => refreshStatus().then((ch) => ch && onChanged()).catch(() => {});
+    check();
+    const iv = setInterval(check, 30000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id, item.upload?.status, item.remote?.status, connected]);
+
+  if (!connected) {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>말씀노트 연결</Text>
+        <Text style={styles.cardLine}>연결하면 이 녹음을 자동으로 받아써서 말씀노트에 정리해 넣어요.</Text>
+        <Pressable style={[styles.convertBtn, { borderColor: color }]} onPress={onSettings}>
+          <Text style={[styles.convertText, { color }]}>연결 설정하기</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const up = item.upload?.status;
+  const rs = item.remote?.status;
+  const send = async () => {
+    setProgress(0);
+    try {
+      await sendRecording(item.id, (r) => setProgress(r));
+    } catch (e) {
+      Alert.alert('전송 실패', (e as Error).message);
+    } finally {
+      setProgress(null);
+      onChanged();
+    }
+  };
+  const step = (state: 'ok' | 'now' | 'err' | '', title: string, sub: string) => (
+    <View style={styles.step}>
+      <View style={[styles.stepDot, state === 'ok' && styles.dotOk, state === 'err' && styles.dotErr, state === 'now' && { borderColor: color }]} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        <Text style={[styles.stepSub, state === 'err' && { color: '#DC2626' }]}>{sub}</Text>
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>말씀노트 연결</Text>
+      {step(
+        up === 'done' ? 'ok' : up === 'error' ? 'err' : 'now',
+        '드라이브 전송',
+        up === 'done' ? '완료' : progress !== null ? `보내는 중 ${Math.round(progress * 100)}%` : up === 'uploading' ? '보내는 중' : up === 'error' ? item.upload?.error || '실패' : '대기',
+      )}
+      {step(
+        rs === 'done' ? 'ok' : rs === 'failed' ? 'err' : up === 'done' ? 'now' : '',
+        '받아쓰기 (VITO)',
+        rs === 'done' ? '완료' : rs === 'failed' ? item.remote?.error || '실패' : rs === 'submitted' ? '받아쓰는 중 · 녹음 길이에 따라 수 분' : up === 'done' ? '5분 안에 시작' : '전송 후 시작',
+      )}
+      {step(rs === 'done' ? 'now' : '', '말씀노트 등록 · AI 정리', rs === 'done' ? '1시간 안에 자동 등록돼요' : '받아쓰기 후 자동')}
+      {progress !== null && (
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%`, backgroundColor: color }]} />
+        </View>
+      )}
+      {up !== 'done' && up !== 'uploading' && progress === null && (
+        <Pressable style={[styles.sendBtn, { backgroundColor: color }]} onPress={send}>
+          <Text style={styles.sendText}>{up === 'error' ? '다시 보내기' : '드라이브로 보내기'}</Text>
+        </Pressable>
+      )}
+      {rs === 'done' && (
+        <Pressable style={[styles.convertBtn, { borderColor: color }]} onPress={() => Linking.openURL(NOTE_APP_URL)}>
+          <Text style={[styles.convertText, { color }]}>말씀노트 열기</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+export default function DetailScreen({ item, onBack, onDelete, connected, onSettings, onChanged }: Props) {
   const mode = getMode(item.mode);
   const player = useAudioPlayer({ uri: item.uri });
   const status = useAudioPlayerStatus(player);
@@ -96,15 +183,8 @@ export default function DetailScreen({ item, onBack, onDelete }: Props) {
         <Text style={styles.cardLine}>저장 위치(RAG): {mode.ragCollection}</Text>
       </View>
 
-      {/* 텍스트 변환 — Phase 1에서 STT 엔진 연결 */}
-      <Pressable
-        style={[styles.convertBtn, { borderColor: mode.color }]}
-        onPress={() =>
-          Alert.alert('텍스트 변환', '다음 단계(Phase 1)에서 STT 엔진(VITO/CLOVA)을 연결하면 활성화돼요.')
-        }
-      >
-        <Text style={[styles.convertText, { color: mode.color }]}>📝 텍스트로 변환 (준비 중)</Text>
-      </Pressable>
+      {/* 말씀노트 연결: 드라이브 전송 → 받아쓰기 → 말씀노트 등록 */}
+      <SyncPanel item={item} color={mode.color} connected={connected} onSettings={onSettings} onChanged={onChanged} />
 
       {item.transcriptMd ? (
         <View style={styles.card}>
@@ -142,6 +222,14 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 8 },
   cardLine: { fontSize: 13, color: '#374151', marginTop: 2 },
   convertBtn: { marginTop: 16, paddingVertical: 14, borderRadius: 14, borderWidth: 2, alignItems: 'center' },
+  step: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  stepDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: '#D1D5DB', marginTop: 4 },
+  dotOk: { backgroundColor: '#16A34A', borderColor: '#16A34A' },
+  dotErr: { backgroundColor: '#DC2626', borderColor: '#DC2626' },
+  stepTitle: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  stepSub: { fontSize: 13, color: '#6B7280', marginTop: 1 },
+  sendBtn: { marginTop: 14, paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
+  sendText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
   convertText: { fontSize: 15, fontWeight: '800' },
   transcript: { fontSize: 14, color: '#111827', lineHeight: 21 },
   deleteBtn: { marginTop: 32, alignItems: 'center', padding: 10 },

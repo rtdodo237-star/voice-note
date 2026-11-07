@@ -1,6 +1,6 @@
 // 앱 진입점 — 권한 요청, 오디오 설정, 화면 전환
-import React, { useEffect, useState } from 'react';
-import { Alert, Linking, Platform, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, AppState, Linking, Platform, StyleSheet, ToastAndroid } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -11,6 +11,8 @@ import {
 import HomeScreen from './src/screens/HomeScreen';
 import RecordScreen from './src/screens/RecordScreen';
 import DetailScreen from './src/screens/DetailScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import { loadSettings, refreshStatus, sendRecording, syncPending } from './src/sync';
 import { ENABLE_BACKGROUND_RECORDING, getMode } from './src/modes';
 import type { ModeId } from './src/modes';
 import {
@@ -25,12 +27,36 @@ import type { RecordingItem } from './src/storage';
 type Screen =
   | { name: 'home' }
   | { name: 'record'; mode: ModeId }
-  | { name: 'detail'; item: RecordingItem };
+  | { name: 'detail'; id: string }
+  | { name: 'settings' };
+
+/** 짧은 알림 (안드로이드는 토스트, 그 외는 생략) */
+const notify = (msg: string) => {
+  if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
+};
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
   const [mode, setMode] = useState<ModeId>('consult');
   const [recordings, setRecordings] = useState<RecordingItem[]>([]);
+  const [connected, setConnected] = useState(false);
+
+  const refresh = useCallback(async () => setRecordings(await loadRecordings()), []);
+
+  // 말씀노트 연결: 못 보낸 녹음 보내기 + 받아쓰기 상태 받아오기 (앱 열 때 · 앱으로 돌아올 때)
+  const syncNow = useCallback(async () => {
+    const s = await loadSettings();
+    setConnected(!!s);
+    if (!s) return;
+    await syncPending(refresh).catch(() => 0);
+    if (await refreshStatus().catch(() => false)) await refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    syncNow();
+    const sub = AppState.addEventListener('change', (st) => st === 'active' && syncNow());
+    return () => sub.remove();
+  }, [syncNow]);
 
   useEffect(() => {
     (async () => {
@@ -81,7 +107,16 @@ export default function App() {
 
   const handleSaved = async (item: RecordingItem) => {
     setRecordings(await addRecording(item));
-    setScreen({ name: 'detail', item });
+    setScreen({ name: 'detail', id: item.id });
+    const s = await loadSettings();
+    if (s?.auto) {
+      notify('드라이브로 보내는 중');
+      setTimeout(refresh, 300);
+      sendRecording(item.id)
+        .then(() => notify('드라이브로 보냈어요 · 곧 받아쓰기를 시작해요'))
+        .catch((e) => notify('드라이브 전송 실패: ' + (e as Error).message))
+        .finally(refresh);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -99,7 +134,9 @@ export default function App() {
             onSelectMode={selectMode}
             onStart={startRecording}
             recordings={recordings}
-            onOpen={(item) => setScreen({ name: 'detail', item })}
+            onOpen={(item) => setScreen({ name: 'detail', id: item.id })}
+            connected={connected}
+            onSettings={() => setScreen({ name: 'settings' })}
           />
         )}
         {screen.name === 'record' && (
@@ -109,11 +146,33 @@ export default function App() {
             onCancel={() => setScreen({ name: 'home' })}
           />
         )}
-        {screen.name === 'detail' && (
-          <DetailScreen
-            item={screen.item}
-            onBack={() => setScreen({ name: 'home' })}
-            onDelete={handleDelete}
+        {screen.name === 'detail' &&
+          (() => {
+            // 저장소의 최신 상태로 보여주기 (백그라운드 전송 결과 반영)
+            const item = recordings.find((r) => r.id === screen.id);
+            return item ? (
+              <DetailScreen
+                key={item.id}
+                item={item}
+                onBack={() => setScreen({ name: 'home' })}
+                onDelete={handleDelete}
+                connected={connected}
+                onSettings={() => setScreen({ name: 'settings' })}
+                onChanged={refresh}
+              />
+            ) : null;
+          })()}
+        {screen.name === 'settings' && (
+          <SettingsScreen
+            onBack={() => {
+              setScreen({ name: 'home' });
+              syncNow();
+            }}
+            onSaved={() => {
+              setScreen({ name: 'home' });
+              notify('말씀노트 연결을 저장했어요');
+              syncNow();
+            }}
           />
         )}
       </SafeAreaView>

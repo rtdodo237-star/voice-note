@@ -101,7 +101,7 @@ export const getMode = (id: ModeId): ModeConfig =>
 export const VOICE_RECORDING: RecordingOptions = {
   ...RecordingPresets.HIGH_QUALITY,
   numberOfChannels: 1,
-  bitRate: 96000,
+  bitRate: 48000, // 음성용: 2시간 ≈ 43MB (받아쓰기 서버 한도 안쪽)
   isMeteringEnabled: true,
   directory: 'document',
 };
